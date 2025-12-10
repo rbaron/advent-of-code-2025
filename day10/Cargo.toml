@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 cached = "0.56.0"
+ndarray = "0.17.1"
+ndarray-linalg = { version = "0.16.0-rc.0" }
+z3 = "0.19.5"

@@ -1,5 +1,8 @@
 use cached::proc_macro::cached;
+use ndarray::prelude::*;
+use ndarray_linalg::Solve;
 use std::collections::{HashSet, VecDeque};
+use z3::{Config, Context, Solver, ast::Int};
 
 #[derive(Debug)]
 struct Mac {
@@ -77,6 +80,7 @@ fn find_least_btn_presses_pt1(mac: &Mac) -> Option<usize> {
     None
 }
 
+// Trying to go from 0 -> joltage requirement while BFS'ing.
 fn find_least_btn_presses_pt2(mac: &Mac) -> Option<usize> {
     // (n_presses, joltages).
     let mut q = VecDeque::from([(0usize, vec![0u16; mac.joltages.len()])]);
@@ -113,6 +117,7 @@ fn find_least_btn_presses_pt2(mac: &Mac) -> Option<usize> {
     None
 }
 
+// Trying to go from the joltage -> 0 while BFS'ing.
 fn find_least_btn_presses_pt22(mac: &Mac) -> Option<usize> {
     // (n_presses, joltages).
     let mut q = VecDeque::from([(0usize, mac.joltages.clone())]);
@@ -135,19 +140,21 @@ fn find_least_btn_presses_pt22(mac: &Mac) -> Option<usize> {
             let mut joltages = joltages.clone();
 
             let idcs = bit_indices(*b);
-            let n_possible_presses = joltages
-                .iter()
-                .enumerate()
-                .filter(|(i, j)| idcs.contains(i))
-                .map(|(i, v)| *v)
-                .min()
-                .unwrap();
+
+            // Greedy approach does not work.
+            // let n_possible_presses = joltages
+            //     .iter()
+            //     .enumerate()
+            //     .filter(|(i, j)| idcs.contains(i))
+            //     .map(|(i, v)| *v)
+            //     .min()
+            //     .unwrap();
 
             // if n_possible_presses < 1 {
             //     continue 'outer;
             // }
 
-            // let n_possible_presses = 1;
+            let n_possible_presses = 1;
 
             // println!("Possible to press {n_possible_presses} times");
 
@@ -161,6 +168,59 @@ fn find_least_btn_presses_pt22(mac: &Mac) -> Option<usize> {
         }
     }
     None
+}
+
+fn solve_min_presses_z3(m: &Mac) -> Option<i64> {
+    let solver = Solver::new();
+
+    let n_presses = m
+        .btns
+        .iter()
+        .enumerate()
+        .map(|(i, b)| Int::fresh_const(&format!("b{i}")))
+        .collect::<Vec<_>>();
+
+    for n in &n_presses {
+        solver.assert(n.ge(0));
+    }
+
+    for (idx, v) in m.joltages.iter().enumerate() {
+        let v = Int::from_i64(*v as i64);
+        // Relevant buttons.
+        let relevant_btns: Vec<_> = m
+            .btns
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                if (b >> idx) & 1 == 1 {
+                    Some(&n_presses[i])
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if relevant_btns.is_empty() {
+            continue;
+        }
+
+        let sum = Int::add(&relevant_btns);
+
+        solver.assert(&sum.eq(&v));
+    }
+
+    // for sol in solver.solutions([alice, bob, charlie], false) {
+    // for sol in solver.solutions(&n_presses, false).into_iter().take(100) {
+    //     println!("{:?}", sol);
+    // }
+
+    let sols = solver.solutions(&n_presses, false).into_iter();
+
+    sols.map(|s| {
+        let values: Vec<i64> = s.iter().map(|v| v.as_i64().unwrap()).collect();
+        values.iter().sum::<i64>()
+    })
+    .min()
 }
 
 fn main() {
@@ -178,15 +238,17 @@ fn main() {
         .sum::<usize>();
     println!("{presses}");
 
-    let n = find_least_btn_presses_pt22(&macs[0]).unwrap();
-    println!("ok: {n}");
+    // Too slow.
+    // let n = find_least_btn_presses_pt22(&macs[0]).unwrap();
+    // println!("ok: {n}");
 
-    // let presses = macs
-    //     .iter()
-    //     .map(|m| {
-    //         println!("Starting machine...");
-    //         find_least_btn_presses_pt22(m).unwrap()
-    //     })
-    //     .sum::<usize>();
-    // println!("{presses}");
+    let min_presses: i64 = macs
+        .iter()
+        .map(|m| {
+            let min = solve_min_presses_z3(m).unwrap();
+            println!("Found: {}", min);
+            min
+        })
+        .sum();
+    println!("{min_presses}");
 }
